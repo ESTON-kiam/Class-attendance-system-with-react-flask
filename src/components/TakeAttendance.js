@@ -1,153 +1,174 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import Webcam from 'react-webcam';
 
 export default function TakeAttendance() {
-  const [active, setActive] = useState(false);
-  const [result, setResult] = useState(null);
-  const [attended, setAttended] = useState([]);
-  const [scanning, setScanning] = useState(false);
-  const [sessionId] = useState(`session_${Date.now()}`);
-  const webcamRef = useRef(null);
+  const webcamRef   = useRef(null);
   const intervalRef = useRef(null);
+  const [sessionId,  setSessionId]  = useState('');
+  const [isRunning,  setIsRunning]  = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const [marked,     setMarked]     = useState([]);
+  const [scanStatus, setScanStatus] = useState('idle');
+  const [scanCount,  setScanCount]  = useState(0);
 
   const scan = useCallback(async () => {
-    if (scanning) return;
-    const img = webcamRef.current?.getScreenshot();
+    if (!webcamRef.current) return;
+    const img = webcamRef.current.getScreenshot();
     if (!img) return;
-    setScanning(true);
+    setScanStatus('scanning');
+    setScanCount(c => c + 1);
     try {
-      const res = await fetch('/api/attendance/recognize', {
+      const res = await fetch('http://localhost:5000/api/attendance/recognize', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({image: img, session_id: sessionId})
+        body: JSON.stringify({ image: img, sessionId: sessionId || 'default' })
       });
       const d = await res.json();
-      setResult(d);
-      if (d.matched && !d.already_marked) {
-        setAttended(prev => {
-          const exists = prev.find(s => s.student_id === d.student.student_id);
-          if (exists) return prev;
-          return [{...d.student, time: d.time}, ...prev];
-        });
+      if (d.recognized && d.student) {
+        setScanStatus('found');
+        setLastResult(d);
+        if (!d.alreadyMarked) {
+          setMarked(prev => prev.find(s => s.studentId===d.student.studentId) ? prev
+            : [{ ...d.student, time: new Date().toLocaleTimeString(), confidence: d.confidence }, ...prev]);
+        }
+        setTimeout(() => setScanStatus('idle'), 2000);
+      } else {
+        setScanStatus('notfound');
+        setLastResult(d);
+        setTimeout(() => setScanStatus('idle'), 1200);
       }
-    } catch { /* network error */ }
-    finally { setScanning(false); }
-  }, [scanning, sessionId]);
+    } catch { setScanStatus('idle'); }
+  }, [sessionId]);
 
   useEffect(() => {
-    if (active) {
-      intervalRef.current = setInterval(scan, 2000);
-    } else {
-      clearInterval(intervalRef.current);
-      setResult(null);
-    }
+    if (isRunning) { intervalRef.current = setInterval(scan, 2500); }
+    else { clearInterval(intervalRef.current); }
     return () => clearInterval(intervalRef.current);
-  }, [active, scan]);
+  }, [isRunning, scan]);
 
-  const stop = () => { setActive(false); };
-
-  const ResultDisplay = () => {
-    if (!result) return null;
-    if (result.matched && result.already_marked)
-      return <div className="result-card warning"><span className="result-icon">🔄</span><div className="result-info"><h3>{result.student?.name}</h3><p>Already marked present today</p></div></div>;
-    if (result.matched)
-      return <div className="result-card matched"><span className="result-icon">✅</span><div className="result-info"><h3>{result.student?.name}</h3><p>{result.student?.student_id} · {result.student?.course} · {result.time}</p></div></div>;
-    if (result.reason === 'no_face')
-      return <div className="result-card unmatched"><span className="result-icon">👁️</span><div className="result-info"><h3>No face detected</h3><p>Please look at the camera</p></div></div>;
-    if (result.reason === 'face_recognition_unavailable')
-      return <div className="result-card unmatched"><span className="result-icon">⚠️</span><div className="result-info"><h3>Library not installed</h3><p>Run: pip install face-recognition</p></div></div>;
-    if (result.reason === 'no_students_registered')
-      return <div className="result-card unmatched"><span className="result-icon">📭</span><div className="result-info"><h3>No students registered</h3><p>Register students first</p></div></div>;
-    return <div className="result-card unmatched"><span className="result-icon">❌</span><div className="result-info"><h3>Student not recognised</h3><p>Not in the system or face unclear</p></div></div>;
-  };
+  const borderColor = {
+    idle:'var(--border)', scanning:'rgba(124,106,247,.5)',
+    found:'rgba(0,212,170,.6)', notfound:'rgba(247,106,138,.4)'
+  }[scanStatus];
+  const glowColor = {
+    idle:'none', scanning:'0 0 28px rgba(124,106,247,.2)',
+    found:'0 0 36px rgba(0,212,170,.25)', notfound:'0 0 28px rgba(247,106,138,.2)'
+  }[scanStatus];
 
   return (
     <div className="page-wide">
       <h1 className="page-title">Take Attendance</h1>
-      <p className="page-sub">Start the camera — students are recognised automatically every 2 seconds.</p>
+      <p className="page-sub">Start a session and let the camera recognise students automatically.</p>
 
-      <div className="layout2">
+      <div className="two-col">
+        {/* LEFT: camera */}
         <div>
+          {!isRunning && (
+            <div className="panel">
+              <div className="panel-title">🚀 Start Session</div>
+              <div className="form-group">
+                <label>Session / Class Name</label>
+                <input value={sessionId} onChange={e=>setSessionId(e.target.value)}
+                  placeholder="e.g. CS101-Monday, DataStructures-Lab" />
+              </div>
+              <button className="btn btn-primary" style={{width:'100%',justifyContent:'center',marginTop:4}}
+                disabled={!sessionId.trim()}
+                onClick={()=>{ setIsRunning(true); setMarked([]); setScanCount(0); setLastResult(null); }}>
+                ▶ Start Attendance Session
+              </button>
+            </div>
+          )}
+
           <div className="panel">
             <div className="panel-title">
-              📷 Live Camera
-              {active && <span className="tag" style={{marginLeft:'auto'}}>🔴 LIVE</span>}
+              📸 Live Camera
+              {isRunning && <span style={{marginLeft:'auto',fontSize:12,color:'var(--accent)',fontFamily:'monospace'}}>LIVE · {scanCount} scans</span>}
             </div>
 
-            {active ? (
-              <div>
-                <div className="webcam-box" style={{maxWidth:'100%', marginBottom:12}}>
-                  <Webcam ref={webcamRef} screenshotFormat="image/jpeg" style={{width:'100%'}} mirrored />
-                  <div className="webcam-overlay">
-                    <div className="scan-ring" style={{animationDuration: scanning?'.8s':'2s'}} />
-                    <div className="corner tl"/><div className="corner tr"/>
-                    <div className="corner bl"/><div className="corner br"/>
-                    <div style={{position:'absolute',bottom:10,left:'50%',transform:'translateX(-50%)',
-                      background:'rgba(0,0,0,.6)',borderRadius:20,padding:'4px 12px',
-                      fontSize:'.75rem',color:'var(--accent)'}}>
-                      {scanning ? '⚡ Scanning…' : '👁️ Watching…'}
+            <div className="webcam-wrapper" style={{border:`2px solid ${borderColor}`,boxShadow:glowColor,transition:'all .35s',marginBottom:14}}>
+              <Webcam ref={webcamRef} audio={false} screenshotFormat="image/jpeg"
+                videoConstraints={{facingMode:'user', width:640, height:480}}
+                style={{width:'100%', display:'block'}} />
+              <div className="webcam-overlay">
+                {isRunning && <div className="scan-line" />}
+                <div style={{
+                  position:'absolute', bottom:12, left:'50%', transform:'translateX(-50%)',
+                  background:'rgba(0,0,0,.65)', borderRadius:20, padding:'5px 16px',
+                  fontSize:13, fontWeight:600, whiteSpace:'nowrap',
+                  color:{idle:'var(--text2)',scanning:'var(--purple)',found:'var(--success)',notfound:'var(--danger)'}[scanStatus],
+                  display:'flex', alignItems:'center', gap:6,
+                }}>
+                  {scanStatus==='scanning' && <><span className="spinner" style={{width:12,height:12}}/>Scanning…</>}
+                  {scanStatus==='found'    && <>✅ Recognized!</>}
+                  {scanStatus==='notfound' && <>❓ No match</>}
+                  {scanStatus==='idle'     && (isRunning ? <>👁 Watching for faces…</> : <>📷 Camera ready</>)}
+                </div>
+                {isRunning && (
+                  <div style={{
+                    position:'absolute', top:'10%', left:'20%', right:'20%', bottom:'15%',
+                    border:`2px dashed ${scanStatus==='found'?'var(--success)':'rgba(124,106,247,.4)'}`,
+                    borderRadius:12, transition:'border-color .3s', pointerEvents:'none',
+                  }} />
+                )}
+              </div>
+            </div>
+
+            {isRunning
+              ? <button className="btn btn-danger" style={{width:'100%',justifyContent:'center'}}
+                  onClick={()=>{ setIsRunning(false); setScanStatus('idle'); }}>⏹ End Session</button>
+              : <p style={{textAlign:'center',color:'var(--text3)',fontSize:13}}>Enter a session name above and click Start</p>
+            }
+          </div>
+
+          {lastResult && isRunning && (
+            <div style={{marginTop:12}}>
+              {lastResult.recognized && lastResult.student ? (
+                <div className={`rec-card ${lastResult.alreadyMarked?'warning':'success'}`}>
+                  <div className="rec-avatar">{lastResult.student.name?.[0]?.toUpperCase()}</div>
+                  <div>
+                    <div className="rec-name">{lastResult.student.name}</div>
+                    <div className="rec-meta">{lastResult.student.studentId} · {lastResult.student.course}
+                      {lastResult.alreadyMarked && <span style={{color:'var(--warning)',marginLeft:8}}>· Already marked</span>}
                     </div>
                   </div>
+                  <div className="rec-conf">{lastResult.confidence}%</div>
                 </div>
-                <button className="btn btn-danger" onClick={stop} style={{width:'100%',justifyContent:'center'}}>
-                  ⏹ Stop Session
-                </button>
-                <ResultDisplay />
-              </div>
-            ) : (
-              <div style={{textAlign:'center', padding:'40px 0'}}>
-                <div style={{fontSize:'4rem', marginBottom:16}}>📸</div>
-                <p style={{color:'var(--text2)', marginBottom:20, fontSize:'.9rem'}}>
-                  Camera will scan for registered faces automatically
-                </p>
-                <button className="btn btn-primary" style={{padding:'13px 32px'}}
-                  onClick={() => { setActive(true); setAttended([]); setResult(null); }}>
-                  ▶ Start Attendance Session
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div>
-          <div className="panel">
-            <div className="panel-title">
-              ✅ Marked Present
-              {attended.length > 0 && (
-                <span style={{marginLeft:'auto', fontSize:'.85rem', color:'var(--accent)', fontWeight:700}}>
-                  {attended.length}
-                </span>
+              ) : (
+                <div className="rec-card error">
+                  <div className="rec-avatar" style={{background:'rgba(247,106,138,.3)'}}>?</div>
+                  <div><div className="rec-name" style={{color:'var(--danger)'}}>Unknown Person</div><div className="rec-meta">Not registered in system</div></div>
+                </div>
               )}
             </div>
-            {attended.length === 0 ? (
-              <p style={{color:'var(--text2)', fontSize:'.875rem', textAlign:'center', padding:'24px 0'}}>
-                No one marked yet. Start the session and have students face the camera.
-              </p>
-            ) : (
-              <div>
-                {attended.map(s => (
-                  <div key={s.student_id} className="attended-row">
-                    <span style={{fontSize:'1.3rem'}}>✅</span>
-                    <div style={{flex:1}}>
-                      <div style={{fontWeight:600, fontSize:'.9rem'}}>{s.name}</div>
-                      <div style={{fontSize:'.78rem', color:'var(--text2)'}}>{s.student_id} · {s.time}</div>
+          )}
+        </div>
+
+        {/* RIGHT: marked list */}
+        <div className="panel" style={{alignSelf:'flex-start'}}>
+          <div className="panel-title">
+            ✅ Marked Today
+            <span style={{marginLeft:'auto',background:'rgba(0,212,170,.1)',color:'var(--accent)',padding:'2px 10px',borderRadius:20,fontSize:14}}>{marked.length}</span>
+          </div>
+          {sessionId && <div style={{fontSize:12,color:'var(--text3)',marginBottom:14}}>Session: <span style={{color:'var(--accent)',fontFamily:'monospace'}}>{sessionId}</span></div>}
+          {marked.length===0
+            ? <div className="empty-state" style={{padding:'28px 0'}}><div className="icon">👥</div><p>No students marked yet</p></div>
+            : <div style={{display:'flex',flexDirection:'column',gap:8,maxHeight:480,overflowY:'auto'}}>
+                {marked.map((s,i) => (
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:12,padding:12,borderRadius:10,background:'var(--bg3)',border:'1px solid var(--border)'}}>
+                    <div style={{width:38,height:38,borderRadius:'50%',background:`hsl(${i*53},55%,38%)`,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,color:'#fff',flexShrink:0}}>
+                      {s.name?.[0]?.toUpperCase()}
                     </div>
-                    <span className="tag">{s.course.split(' ')[0]}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:600,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</div>
+                      <div style={{color:'var(--text3)',fontSize:12}}>{s.studentId}</div>
+                    </div>
+                    <div style={{textAlign:'right',flexShrink:0}}>
+                      <div style={{color:'var(--success)',fontSize:11,fontFamily:'monospace'}}>{s.time}</div>
+                      <div style={{color:'var(--text3)',fontSize:11}}>{s.confidence}%</div>
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-
-          <div className="panel" style={{fontSize:'.83rem', color:'var(--text2)', lineHeight:1.7}}>
-            <div className="panel-title">ℹ️ How it works</div>
-            <ol style={{paddingLeft:16}}>
-              <li>Click <strong style={{color:'var(--text)'}}>Start Attendance Session</strong></li>
-              <li>Each student stands in front of the camera</li>
-              <li>The system scans every 2 seconds</li>
-              <li>A match marks the student present automatically</li>
-              <li>Stop the session when done</li>
-            </ol>
-          </div>
+          }
         </div>
       </div>
     </div>

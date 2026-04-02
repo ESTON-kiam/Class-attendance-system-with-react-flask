@@ -4,7 +4,7 @@ import Webcam from 'react-webcam';
 const COURSES = ['Computer Science','Information Technology','Software Engineering','Data Science','Electrical Engineering','Mechanical Engineering','Business Administration','Mathematics','Physics','Other'];
 
 export default function Register() {
-  const [form, setForm] = useState({ student_id:'', name:'', course:'' });
+  const [form, setForm] = useState({ studentId:'', name:'', course:'' });
   const [image, setImage] = useState(null);
   const [camOpen, setCamOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -19,6 +19,7 @@ export default function Register() {
   const capture = useCallback(() => {
     const src = webcamRef.current?.getScreenshot();
     if (src) { setImage(src); setCamOpen(false); }
+    else showToast('Could not capture — allow camera access', 'error');
   }, []);
 
   const handleFileUpload = (e) => {
@@ -30,19 +31,19 @@ export default function Register() {
   };
 
   const handleSubmit = async () => {
-    if (!form.student_id || !form.name || !form.course || !image) {
+    if (!form.studentId || !form.name || !form.course || !image) {
       showToast('Please fill all fields and provide a photo', 'error'); return;
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/students/register', {
+      const res = await fetch('http://localhost:5000/api/students/register', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({...form, image})
+        body: JSON.stringify({ studentId:form.studentId, name:form.name, course:form.course, image })
       });
       const d = await res.json();
       if (!res.ok) { showToast(d.error || 'Registration failed', 'error'); return; }
-      showToast(`✓ ${form.name} registered successfully! (Face: ${d.face_status})`);
-      setForm({student_id:'', name:'', course:''});
+      showToast(`✓ ${form.name} registered successfully!`);
+      setForm({ studentId:'', name:'', course:'' });
       setImage(null);
     } catch {
       showToast('Network error — is the backend running?', 'error');
@@ -57,14 +58,15 @@ export default function Register() {
       <p className="page-sub">Add a new student with their biometric photo for automatic attendance.</p>
 
       <div className="layout2">
+        {/* LEFT: form */}
         <div>
           <div className="panel">
             <div className="panel-title">📋 Student Information</div>
             <div className="form-grid">
               <div className="form-group">
                 <label>Student ID / Reg. Number</label>
-                <input placeholder="e.g. SCT211-0001/2022" value={form.student_id}
-                  onChange={e => setForm({...form, student_id: e.target.value})} />
+                <input placeholder="e.g. SCT211-0001/2022" value={form.studentId}
+                  onChange={e => setForm({...form, studentId: e.target.value})} />
               </div>
               <div className="form-group">
                 <label>Full Name</label>
@@ -87,6 +89,7 @@ export default function Register() {
           </button>
         </div>
 
+        {/* RIGHT: camera */}
         <div>
           <div className="panel">
             <div className="panel-title">📸 Biometric Photo</div>
