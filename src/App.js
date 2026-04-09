@@ -3,6 +3,7 @@ import Register from './components/Register';
 import TakeAttendance from './components/TakeAttendance';
 import Students from './components/Students';
 import AttendanceRecords from './components/AttendanceRecords';
+import Units from './components/Units';
 import './App.css';
 
 export default function App() {
@@ -17,10 +18,11 @@ export default function App() {
   }, []);
 
   const nav = [
+    { id:'units',      label:'Course Units',    icon:'📚' },
     { id:'register',   label:'Register Student', icon:'👤' },
-    { id:'attendance', label:'Take Attendance',   icon:'📸' },
-    { id:'students',   label:'Students',          icon:'🎓' },
-    { id:'records',    label:'Records',           icon:'📊' },
+    { id:'attendance', label:'Take Attendance',  icon:'📸' },
+    { id:'students',   label:'Students',         icon:'🎓' },
+    { id:'records',    label:'Records',          icon:'📊' },
   ];
 
   return (
@@ -47,6 +49,7 @@ export default function App() {
       </header>
 
       {page==='home'       && <HomePage setPage={setPage} backendStatus={backendStatus} />}
+      {page==='units'      && <Units />}
       {page==='register'   && <Register />}
       {page==='attendance' && <TakeAttendance />}
       {page==='students'   && <Students />}
@@ -57,10 +60,11 @@ export default function App() {
 
 function HomePage({ setPage, backendStatus }) {
   const cards = [
-    { id:'register',   icon:'👤', title:'Register Student',  desc:'Add a new student with their ID, name, course, and biometric face photo.', color:'#00d4aa' },
-    { id:'attendance', icon:'📸', title:'Take Attendance',    desc:'Point the camera — students are recognised automatically in real time.',    color:'#7c6af7' },
-    { id:'students',   icon:'🎓', title:'View Students',      desc:'Browse all registered students and manage the database.',                    color:'#f7c76a' },
-    { id:'records',    icon:'📊', title:'Attendance Records', desc:'View detailed attendance logs by date and export reports.',                  color:'#f76a8a' },
+    { id:'units',      icon:'📚', title:'Course Units',     desc:'Add and manage course units and assign lecturers before registering students.', color:'#a78bfa' },
+    { id:'register',   icon:'👤', title:'Register Student', desc:'Add a new student with their ID, name, course unit, and biometric face photo.', color:'#00d4aa' },
+    { id:'attendance', icon:'📸', title:'Take Attendance',  desc:'Select a unit, start a session — students are recognised automatically.',       color:'#7c6af7' },
+    { id:'students',   icon:'🎓', title:'View Students',    desc:'Browse all registered students and manage the database.',                        color:'#f7c76a' },
+    { id:'records',    icon:'📊', title:'Records & Export', desc:'View daily logs and export full semester reports as Excel.',                     color:'#f76a8a' },
   ];
   return (
     <main className="home">

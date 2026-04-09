@@ -1,20 +1,29 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
 
-const COURSES = ['Computer Science','Information Technology','Software Engineering','Data Science','Electrical Engineering','Mechanical Engineering','Business Administration','Mathematics','Physics','Other'];
+const API = 'http://localhost:5000';
 
 export default function Register() {
-  const [form, setForm] = useState({ studentId:'', name:'', course:'' });
-  const [image, setImage] = useState(null);
+  const [units,   setUnits]   = useState([]);
+  const [form,    setForm]    = useState({ studentId:'', name:'', course:'' });
+  const [image,   setImage]   = useState(null);
   const [camOpen, setCamOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast,   setToast]   = useState(null);
   const webcamRef = useRef(null);
 
   const showToast = (msg, type='success') => {
     setToast({msg, type});
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Load units from backend
+  useEffect(() => {
+    fetch(`${API}/api/units`)
+      .then(r => r.json())
+      .then(d => setUnits(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   const capture = useCallback(() => {
     const src = webcamRef.current?.getScreenshot();
@@ -36,9 +45,9 @@ export default function Register() {
     }
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:5000/api/students/register', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ studentId:form.studentId, name:form.name, course:form.course, image })
+      const res = await fetch(`${API}/api/students/register`, {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ studentId: form.studentId, name: form.name, course: form.course, image })
       });
       const d = await res.json();
       if (!res.ok) { showToast(d.error || 'Registration failed', 'error'); return; }
@@ -74,17 +83,34 @@ export default function Register() {
                   onChange={e => setForm({...form, name: e.target.value})} />
               </div>
             </div>
+
             <div className="form-group">
-              <label>Course / Programme</label>
-              <select value={form.course} onChange={e => setForm({...form, course: e.target.value})}>
-                <option value="">— Select course —</option>
-                {COURSES.map(c => <option key={c}>{c}</option>)}
-              </select>
+              <label>Course Unit</label>
+              {units.length > 0 ? (
+                <select value={form.course} onChange={e => setForm({...form, course: e.target.value})}>
+                  <option value="">— Select course unit —</option>
+                  {units.map(u => (
+                    <option key={u.id} value={u.name}>
+                      {u.code} — {u.name}{u.lecturer ? ` (${u.lecturer})` : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{
+                  background:'rgba(247,200,106,.08)', border:'1px solid rgba(247,200,106,.25)',
+                  borderRadius:10, padding:'12px 14px',
+                  fontSize:'.85rem', color:'var(--yellow)',
+                }}>
+                  ⚠️ No course units added yet.{' '}
+                  <span style={{color:'var(--text2)'}}>Go to <strong>Course Units</strong> tab to add units first.</span>
+                </div>
+              )}
             </div>
           </div>
 
-          <button className="btn btn-primary" style={{width:'100%', justifyContent:'center', padding:'13px'}}
-            onClick={handleSubmit} disabled={loading}>
+          <button className="btn btn-primary"
+            style={{width:'100%', justifyContent:'center', padding:'13px'}}
+            onClick={handleSubmit} disabled={loading || !units.length}>
             {loading ? '⏳ Registering…' : '✓ Register Student'}
           </button>
         </div>
