@@ -136,34 +136,81 @@ def delete_student(uid):
 
 @app.route("/api/attendance/recognize", methods=["POST"])
 def recognize_face():
-    data       = request.json or {}
-    image_b64  = data.get("image","")
-    session_id = data.get("sessionId","default")
+    data        = request.json or {}
+    image_b64   = data.get("image","")
+    session_id  = data.get("sessionId","default")
+    course_unit = data.get("courseUnit","").strip()   # the unit the lecturer selected
+
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
     try:
         img = b64_to_pil(image_b64)
         if quick_face_check(img) == 0:
             return jsonify({"recognized": False, "message": "No face detected"})
-        students = load_students()
-        if not students:
+
+        all_students = load_students()
+        if not all_students:
             return jsonify({"recognized": False, "message": "No students registered yet"})
+
+        # Filter to only students enrolled in this course unit
+        # If no course unit specified, use all students (fallback)
+        if course_unit:
+            unit_students = [s for s in all_students if s.get("course","").strip().lower() == course_unit.lower()]
+        else:
+            unit_students = all_students
+
+        if not unit_students:
+            return jsonify({
+                "recognized": False,
+                "message": f"No students registered for '{course_unit}'"
+            })
+
         embedding, err = get_embedding(img)
         if err or embedding is None:
             return jsonify({"recognized": False, "message": err or "Could not extract face"})
+
+        # Compare only against students in this course unit
         best_student, best_sim = None, -1
-        for s in students:
+        for s in unit_students:
             p = os.path.join(FACES_DIR, f"{s['id']}.npy")
             if not os.path.exists(p): continue
             sim = cosine_sim(embedding, np.load(p))
             if sim > best_sim:
                 best_sim     = sim
                 best_student = s
+
         if best_student and best_sim >= 0.7:
             already = mark_attendance(best_student, session_id)
-            return jsonify({"recognized": True, "student": best_student,
-                            "confidence": round(best_sim*100,1), "alreadyMarked": already})
+            return jsonify({
+                "recognized":   True,
+                "student":      best_student,
+                "confidence":   round(best_sim*100,1),
+                "alreadyMarked": already
+            })
+
+        # Face recognized but NOT in this course unit — check if they exist in another unit
+        best_other, best_other_sim = None, -1
+        other_students = [s for s in all_students if s not in unit_students]
+        for s in other_students:
+            p = os.path.join(FACES_DIR, f"{s['id']}.npy")
+            if not os.path.exists(p): continue
+            sim = cosine_sim(embedding, np.load(p))
+            if sim > best_other_sim:
+                best_other_sim = sim
+                best_other     = s
+
+        if best_other and best_other_sim >= 0.7:
+            # Person is registered but in a different course unit
+            return jsonify({
+                "recognized":    False,
+                "wrongUnit":     True,
+                "message":       f"Not enrolled in {course_unit}",
+                "student":       best_other,
+                "studentCourse": best_other.get("course",""),
+            })
+
         return jsonify({"recognized": False, "message": "Face not recognized"})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -242,6 +289,124 @@ def export_attendance():
     })
 
 # ── Start ─────────────────────────────────────────────────────────────────────
+# ── Course Units Management ───────────────────────────────────────────────────
+UNITS_DB = "data/units.json"
+
+def load_units():
+    if not os.path.exists(UNITS_DB):
+        return []
+    with open(UNITS_DB) as f:
+        return json.load(f)
+
+def save_units(units):
+    with open(UNITS_DB, "w") as f:
+        json.dump(units, f, indent=2)
+
+@app.route("/api/units", methods=["GET"])
+def get_units():
+    return jsonify(load_units())
+
+@app.route("/api/units", methods=["POST"])
+def add_unit():
+    data     = request.json or {}
+    code     = data.get("code", "").strip()
+    name     = data.get("name", "").strip()
+    lecturer = data.get("lecturer", "").strip()
+    if not code or not name:
+        return jsonify({"error": "Unit code and name are required"}), 400
+    units = load_units()
+    if any(u["code"].lower() == code.lower() for u in units):
+        return jsonify({"error": f"Unit code '{code}' already exists"}), 409
+    unit = {
+        "id":       str(uuid.uuid4())[:8],
+        "code":     code,
+        "name":     name,
+        "lecturer": lecturer,
+        "createdAt": datetime.now().isoformat()
+    }
+    units.append(unit)
+    save_units(units)
+    return jsonify({"success": True, "message": f"Unit '{name}' added!", "unit": unit})
+
+@app.route("/api/units/<uid>", methods=["DELETE"])
+def delete_unit(uid):
+    units = [u for u in load_units() if u["id"] != uid]
+    save_units(units)
+    return jsonify({"success": True})
+
+@app.route("/api/units/<uid>", methods=["PUT"])
+def update_unit(uid):
+    data  = request.json or {}
+    units = load_units()
+    for u in units:
+        if u["id"] == uid:
+            u["code"]     = data.get("code",     u["code"]).strip()
+            u["name"]     = data.get("name",     u["name"]).strip()
+            u["lecturer"] = data.get("lecturer", u["lecturer"]).strip()
+            break
+    save_units(units)
+    return jsonify({"success": True})
+
+# ── Weeks Management ─────────────────────────────────────────────────────────
+WEEKS_DB = "data/weeks.json"
+
+def load_weeks():
+    if not os.path.exists(WEEKS_DB):
+        return []
+    with open(WEEKS_DB) as f:
+        return json.load(f)
+
+def save_weeks(weeks):
+    with open(WEEKS_DB, "w") as f:
+        json.dump(weeks, f, indent=2)
+
+@app.route("/api/weeks", methods=["GET"])
+def get_weeks():
+    return jsonify(load_weeks())
+
+@app.route("/api/weeks", methods=["POST"])
+def add_week():
+    data  = request.json or {}
+    label = data.get("label", "").strip()   # e.g. "Week 1"
+    dates = data.get("dates", "").strip()   # e.g. "Apr 7 – Apr 11"
+    notes = data.get("notes", "").strip()   # optional
+    if not label:
+        return jsonify({"error": "Week label is required"}), 400
+    weeks = load_weeks()
+    if any(w["label"].lower() == label.lower() for w in weeks):
+        return jsonify({"error": f"'{label}' already exists"}), 409
+    week = {
+        "id":        str(uuid.uuid4())[:8],
+        "label":     label,
+        "dates":     dates,
+        "notes":     notes,
+        "createdAt": datetime.now().isoformat()
+    }
+    weeks.append(week)
+    save_weeks(weeks)
+    return jsonify({"success": True, "message": f"'{label}' added!", "week": week})
+
+@app.route("/api/weeks/<wid>", methods=["DELETE"])
+def delete_week(wid):
+    weeks = [w for w in load_weeks() if w["id"] != wid]
+    save_weeks(weeks)
+    return jsonify({"success": True})
+
+@app.route("/api/weeks/<wid>", methods=["PUT"])
+def update_week(wid):
+    data  = request.json or {}
+    weeks = load_weeks()
+    for w in weeks:
+        if w["id"] == wid:
+            w["label"] = data.get("label", w["label"]).strip()
+            w["dates"] = data.get("dates", w["dates"]).strip()
+            w["notes"] = data.get("notes", w["notes"]).strip()
+            break
+    save_weeks(weeks)
+    return jsonify({"success": True})
+
+# ── End weeks ─────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     print("="*50)
     print("  FaceTrack  →  http://localhost:5000")

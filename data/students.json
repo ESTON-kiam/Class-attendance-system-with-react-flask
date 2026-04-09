@@ -1,16 +1,9 @@
 [
   {
-    "id": "7e604722",
+    "id": "cb3b435b",
     "studentId": "BSSEC01/1145/2021",
-    "name": "ESTON KIAMA ITEGI",
-    "course": "Software Engineering",
-    "registeredAt": "2026-04-01T23:47:24.836019"
-  },
-  {
-    "id": "18f0ff3f",
-    "studentId": "BSSEC01/1140/2021",
-    "name": "JAMES",
-    "course": "Information Technology",
-    "registeredAt": "2026-04-01T23:47:49.439521"
+    "name": "ESTON KIAMA",
+    "course": "BACHELOR OF SCIENCE IN SOFTWARE ENGINEERING",
+    "registeredAt": "2026-04-09T08:56:43.933973"
   }
 ]
